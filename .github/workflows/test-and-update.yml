@@ -1,62 +1,56 @@
-name: Test and Update dist
+name: Test
 
 on:
   pull_request:
     branches: [master]
+  push:
+    branches: [master]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - name: Set up Repository
-        uses: actions/checkout@v3
-
-      - name: Get Node Version
-        id: node_version
-        run: |
-          node_version=`cat .nvmrc`
-          echo "::set-output name=node_version::$node_version"
-          echo "Node Version: $node_version"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: ${{ steps.node_version.outputs.node_version }}
+          node-version-file: .nvmrc
+          cache: npm
 
-      - name: Cache NPM Dependencies
-        id: cache-npm-dependencies
-        uses: actions/cache@v2
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node_modules-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node_modules-
+      - name: Install NPM Dependencies
+        run: npm ci
 
-      - name: Install NPM Dependencies if not cached
-        if: steps.cache-npm-dependencies.outputs.cache-hit != 'true'
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
         run: |
-          npm install
+          npm run lint
+          npm run format-check
 
-      - name: Build Action
-        run: npm run build
+      - name: Test
+        run: npm test
 
-      - name: Lint Action
-        run: npm run lint
-
-      - name: Test Action
-        run: npm run test
-
-      - name: Package Action
+      - name: Package
         run: npm run package
 
-      - name: Commit if dist has changed
+      # dist/ is what action.yml executes, so it must be rebuilt and committed with every source change
+      - name: Verify dist is up to date
         run: |
-          echo "${{ toJson(github) }}"
-          git config user.name "Github Actions"
-          git config user.email noreply@github.com
-          if [ $(git status dist --porcelain=v1 2>/dev/null | wc -l) != "0" ]; then
-            git add dist
-            git commit -m "chore: updated dist with new code"
-            git push origin HEAD:${{ github.event.pull_request.head.ref }} --force
+          if [ -n "$(git status --porcelain dist)" ]; then
+            echo "::error::dist/ is stale. Run 'npm run package' and commit the result."
+            git diff --stat dist
+            exit 1
           fi

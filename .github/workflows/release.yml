@@ -5,6 +5,9 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+
 jobs:
   get-admins:
     if: github.event.head_commit.message == 'do-production-release'
@@ -12,93 +15,92 @@ jobs:
     outputs:
       admins: ${{ steps.admins.outputs.admins }}
     steps:
-      - name: Dump Github Context
-        continue-on-error: true
-        run: |
-          printf "${{ toJson(github) }}"
-
       - name: Set up Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          persist-credentials: false
 
       - name: Get Admins
         id: admins
         run: |
-          admins="|`tr '\n' '|' < .github/admins.txt`"
-          echo "::set-output name=admins::$admins"
+          admins="|$(tr '\n' '|' < .github/admins.txt)"
+          echo "admins=$admins" >> "$GITHUB_OUTPUT"
           echo "Admins: $admins"
 
   create-release:
     needs: get-admins
     if: github.event.head_commit.message == 'do-production-release' && contains(needs.get-admins.outputs.admins, format('|{0}|', github.event.head_commit.author.username))
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Set up Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Get Node Version
-        id: node_version
-        run: |
-          node_version=`cat .nvmrc`
-          echo "::set-output name=node_version::$node_version"
-          echo "Node Version: $node_version"
-
       - name: Set up Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: ${{ steps.node_version.outputs.node_version }}
+          node-version-file: .nvmrc
 
-      - name: Install Semantic Release NPM Dependencies
-        run: |
-          npm i -g semantic-release @semantic-release/{commit-analyzer,release-notes-generator}
-
-      - name: Run Semantic Release
+      - name: Run Semantic Release (dry run)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          npx semantic-release --repository-url "https://github.com/$GITHUB_REPOSITORY" --branches master --tagFormat \${version} --plugins "@semantic-release/commit-analyzer" "@semantic-release/release-notes-generator" --no-ci --dry-run > temp.txt
+          # shellcheck disable=SC2016 # ${version} is a semantic-release placeholder, not a shell var
+          npx -y \
+            -p semantic-release@25 \
+            -p @semantic-release/commit-analyzer@13 \
+            -p @semantic-release/release-notes-generator@14 \
+            semantic-release \
+            --repository-url "https://github.com/$GITHUB_REPOSITORY" \
+            --branches master \
+            --tagFormat '${version}' \
+            --plugins "@semantic-release/commit-analyzer" "@semantic-release/release-notes-generator" \
+            --no-ci --dry-run > temp.txt
+          cat temp.txt
 
-      - name: Get Last Release Version
-        continue-on-error: true
+      - name: Compute Versions
+        id: version
         run: |
-          last_version=`git describe --tags --abbrev=0`
+          last_version=$(git describe --tags --abbrev=0 --match '[0-9]*' 2>/dev/null || true)
+          next_version=$(grep -oP 'The next release version is \K\S+' temp.txt || true)
           echo "Last Version: $last_version"
-          echo "last_version=$last_version" >> $GITHUB_ENV
-
-      - name: Get Next Release Version
-        run: |
-          next_version=`cat temp.txt | grep -oP 'Published release \K.*? ' | xargs`
           echo "Next Version: $next_version"
-          echo "next_version=$next_version" >> $GITHUB_ENV
 
-      - name: Cancel if Next Version is same as Last Version
-        if: (env.last_version == env.next_version) || env.next_version == ''
-        uses: andymckay/cancel-action@0.3
-
-      - name: Get Major Version related to Next Version
-        run: |
-          major_version="v`echo $next_version | cut -d \. -f 1`"
-          echo "Major Version: $major_version"
-          echo "major_version=$major_version" >> $GITHUB_ENV
-          major_version_exists="false"
-          if git rev-parse $major_version >/dev/null 2>&1; then
-            major_version_exists="true"
+          if [ -z "$next_version" ] || [ "$next_version" = "$last_version" ]; then
+            echo "::notice::No releasable commits since $last_version; skipping release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          echo "major_version_exists=$major_version_exists" >> $GITHUB_ENV
+
+          major_version="v${next_version%%.*}"
+          major_version_exists=false
+          if git rev-parse "$major_version" >/dev/null 2>&1; then
+            major_version_exists=true
+          fi
+          echo "Major Version: $major_version (exists: $major_version_exists)"
+
+          {
+            echo "skip=false"
+            echo "next_version=$next_version"
+            echo "major_version=$major_version"
+            echo "major_version_exists=$major_version_exists"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Generate Release Notes
+        if: steps.version.outputs.skip != 'true'
         run: |
-          release_notes=`cat temp.txt | sed '/^##/,$!d' | awk '{$1=$1};1' | sed 's/))/)/g' | sed 's/ (h/](h/g' | sed 's/^## /## [/' | sed 's/) (/)(/g' | sed 's/ (/ [/g' | sed 's/)(/) (/g' | sed 's/\w/\u&/'`
-          printf "$release_notes" > RELEASE_NOTES.md
+          release_notes=$(sed '/^##/,$!d' temp.txt | awk '{$1=$1};1' | sed 's/))/)/g' | sed 's/ (h/](h/g' | sed 's/^## /## [/' | sed 's/) (/)(/g' | sed 's/ (/ [/g' | sed 's/)(/) (/g' | sed 's/\w/\u&/')
+          printf '%s\n' "$release_notes" > RELEASE_NOTES.md
 
       - name: Create Release
-        uses: ncipollo/release-action@v1
+        if: steps.version.outputs.skip != 'true'
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
         with:
-          name: ${{ env.next_version }}
-          tag: ${{ env.next_version }}
+          name: ${{ steps.version.outputs.next_version }}
+          tag: ${{ steps.version.outputs.next_version }}
           commit: master
           bodyFile: RELEASE_NOTES.md
           prerelease: false
@@ -106,20 +108,23 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Major Version Release if it doesn't exist
-        if: env.major_version_exists == 'false'
-        uses: ncipollo/release-action@v1
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.major_version_exists == 'false'
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
         with:
-          name: ${{ env.major_version }}
-          tag: ${{ env.major_version }}
+          name: ${{ steps.version.outputs.major_version }}
+          tag: ${{ steps.version.outputs.major_version }}
           commit: master
           prerelease: false
           draft: false
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update Major Version Release if it exists
-        if: env.major_version_exists == 'true'
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.major_version_exists == 'true'
+        env:
+          MAJOR_VERSION: ${{ steps.version.outputs.major_version }}
+          NEXT_VERSION: ${{ steps.version.outputs.next_version }}
         run: |
           git config user.name "Github Actions"
           git config user.email noreply@github.com
-          git tag -fa $major_version -m "chore: point $major_version to $next_version"
-          git push origin $major_version --force
+          git tag -fa "$MAJOR_VERSION" -m "chore: point $MAJOR_VERSION to $NEXT_VERSION"
+          git push origin "$MAJOR_VERSION" --force
