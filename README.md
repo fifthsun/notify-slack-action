@@ -249,9 +249,14 @@ git clone https://github.com/ravsamhq/notify-slack-action.git
 # change directory
 cd notify-slack-action
 
-# install dependencies
-npm install
+# install dependencies (Node 24, see .nvmrc)
+npm ci
+
+# typecheck, format, lint, test and rebuild dist/
+npm run all
 ```
+
+`action.yml` runs the committed `dist/index.js` bundle, so commit `dist/` alongside any source or dependency change. CI fails if it is stale.
 
 ## Versioning
 
