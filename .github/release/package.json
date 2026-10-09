@@ -1,0 +1,10 @@
+{
+  "name": "notify-slack-action-release-tooling",
+  "private": true,
+  "description": "Pinned semantic-release toolchain for .github/workflows/release.yml (installed with npm ci --ignore-scripts)",
+  "dependencies": {
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "semantic-release": "25.0.9"
+  }
+}

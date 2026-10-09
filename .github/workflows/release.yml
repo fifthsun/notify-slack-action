@@ -38,22 +38,25 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # Keep the write token off disk; it is passed only to the steps that need it
+          persist-credentials: false
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
 
+      # Locked dependency tree (integrity-checked) with lifecycle scripts disabled
+      - name: Install Release Tooling
+        run: npm ci --ignore-scripts --prefix .github/release
+
+      # semantic-release verifies push access even in --dry-run, so it needs the token
       - name: Run Semantic Release (dry run)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # shellcheck disable=SC2016 # ${version} is a semantic-release placeholder, not a shell var
-          npx -y \
-            -p semantic-release@25 \
-            -p @semantic-release/commit-analyzer@13 \
-            -p @semantic-release/release-notes-generator@14 \
-            semantic-release \
+          .github/release/node_modules/.bin/semantic-release \
             --repository-url "https://github.com/$GITHUB_REPOSITORY" \
             --branches master \
             --tagFormat '${version}' \
@@ -121,10 +124,11 @@ jobs:
       - name: Update Major Version Release if it exists
         if: steps.version.outputs.skip != 'true' && steps.version.outputs.major_version_exists == 'true'
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MAJOR_VERSION: ${{ steps.version.outputs.major_version }}
           NEXT_VERSION: ${{ steps.version.outputs.next_version }}
         run: |
           git config user.name "Github Actions"
           git config user.email noreply@github.com
           git tag -fa "$MAJOR_VERSION" -m "chore: point $MAJOR_VERSION to $NEXT_VERSION"
-          git push origin "$MAJOR_VERSION" --force
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/$MAJOR_VERSION" --force
