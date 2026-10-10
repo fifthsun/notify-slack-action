@@ -1,4 +1,4 @@
-import { getInput, setFailed } from "@actions/core"
+import { getInput, setFailed, warning } from "@actions/core"
 import { context } from "@actions/github"
 
 type JobStatus = "success" | "failure" | "cancelled" | "warning" | "skipped"
@@ -147,8 +147,9 @@ const notifySlack = async (payload: string) => {
     headers: { "Content-Type": "application/json" },
     body: payload,
   })
+  // Upstream never checked the response, so HTTP errors stay non-fatal to keep @v2 consumers green
   if (!rep.ok) {
-    throw new Error(`Slack webhook responded ${rep.status}: ${await rep.text()}`)
+    warning(`Slack webhook responded ${rep.status}: ${await rep.text()}`)
   }
 }
 

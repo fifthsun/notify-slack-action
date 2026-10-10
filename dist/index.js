@@ -32346,7 +32346,7 @@ function error(message, properties = {}) {
  * @param properties optional properties to add to the annotation.
  */
 function warning(message, properties = {}) {
-    issueCommand('warning', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+    command_issueCommand('warning', utils_toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
 /**
  * Adds a notice issue
@@ -37586,8 +37586,9 @@ const notifySlack = async (payload) => {
         headers: { "Content-Type": "application/json" },
         body: payload,
     });
+    // Upstream never checked the response, so HTTP errors stay non-fatal to keep @v2 consumers green
     if (!rep.ok) {
-        throw new Error(`Slack webhook responded ${rep.status}: ${await rep.text()}`);
+        warning(`Slack webhook responded ${rep.status}: ${await rep.text()}`);
     }
 };
 const run = async () => {

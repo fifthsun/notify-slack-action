@@ -31,7 +31,7 @@ All logic lives in `src/main.ts`:
 
 - `run()` runs **when the module is imported**. It checks `notify_when`, calls `buildPayload()`, and POSTs to `process.env.SLACK_WEBHOOK_URL`.
 - `buildPayload()` (the only export) reads `@actions/github` `context` to build a map of template variables (`{repo}`, `{branch}`, `{commit_sha}`, `{run_url}`, `{workflow_url}`, `{emoji}`, `{status_message}`, …). It substitutes them into `notification_title`, `message_format` and `footer` with `replaceAll`, then returns a JSON string holding a single legacy Slack `attachments` entry. It does not use Block Kit.
-- HTTP uses Node's global `fetch`; there's no node-fetch. `notifySlack()` awaits the POST and throws on a non-2xx response, and `run()` turns that into `setFailed`, which fails the step.
+- HTTP uses Node's global `fetch`; there's no node-fetch. `notifySlack()` awaits the POST. Network errors fail the step via `setFailed`, which matches upstream, where an unawaited rejection crashed the process. A non-2xx response only emits a `warning` annotation, because upstream let it pass and making it fatal would turn existing `@v2` consumers red.
 - `{workflow_url}` costs an extra GitHub API call (`/repos/{repo}/actions/workflows`) that needs the `token` input. It short-circuits to `"test-workflow-url"` when `NODE_ENV === "test"`.
 - Adding a template variable means updating `patterns` in `buildPayload()` and the variable list in README.md. Adding an input means updating both `action.yml` and the README "Inputs" block, which duplicates it.
 
