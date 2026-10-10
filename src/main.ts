@@ -1,6 +1,5 @@
-import { getInput, setFailed } from "@actions/core"
+import { getInput, setFailed, warning } from "@actions/core"
 import { context } from "@actions/github"
-import fetch from "node-fetch"
 
 type JobStatus = "success" | "failure" | "cancelled" | "warning" | "skipped"
 
@@ -86,9 +85,8 @@ const getWorkflowUrl = async (repo: string, name: string) => {
   })
 
   if (rep.status === 200) {
-    const data = await rep.json()
-    const workflows = data.workflows
-    for (const workflow of workflows) {
+    const data = (await rep.json()) as { workflows: Array<{ name: string; html_url: string }> }
+    for (const workflow of data.workflows) {
       if (workflow.name === name) {
         return workflow.html_url
       }
@@ -144,11 +142,15 @@ const notifySlack = async (payload: string) => {
   const webhookUrl = process.env.SLACK_WEBHOOK_URL
   if (!webhookUrl) throw new Error("No SLACK_WEBHOOK_URL provided")
 
-  fetch(webhookUrl, {
+  const rep = await fetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: payload,
   })
+  // Upstream never checked the response, so HTTP errors stay non-fatal to keep @v2 consumers green
+  if (!rep.ok) {
+    warning(`Slack webhook responded ${rep.status}: ${await rep.text()}`)
+  }
 }
 
 const run = async () => {

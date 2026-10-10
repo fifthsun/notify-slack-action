@@ -1,7 +1,9 @@
+import { afterEach, beforeEach, expect, test, vi } from "vitest"
+
 const env = process.env
 
 beforeEach(() => {
-  jest.resetModules()
+  vi.resetModules()
   process.env = { ...env }
 })
 
@@ -9,7 +11,7 @@ afterEach(() => {
   process.env = env
 })
 
-const buildPayload = async (env?: Record<string, string>) => {
+const buildPayload = async (overrides?: Record<string, string>) => {
   process.env = {
     ...process.env,
     GITHUB_WORKFLOW: "test-workflow",
@@ -18,17 +20,17 @@ const buildPayload = async (env?: Record<string, string>) => {
     GITHUB_REF: "refs/heads/test-patch-1",
     INPUT_ICON_SUCCESS: ":DONE:",
     INPUT_ICON_FAILURE: ":FAIL:",
-    ...env,
+    ...overrides,
   }
 
-  const fn = require("../src/main").buildPayload
+  const { buildPayload: fn } = await import("../src/main")
 
   const rep = await fn()
   return JSON.parse(rep)
 }
 
-const getAttachment = async (env?: Record<string, string>) => {
-  const payload = await buildPayload(env)
+const getAttachment = async (overrides?: Record<string, string>) => {
+  const payload = await buildPayload(overrides)
   return payload.attachments[0]
 }
 
@@ -111,9 +113,7 @@ test("workflow with mentions users", async () => {
 })
 
 test("workflow with mentions groups", async () => {
-  let rep
-
-  rep = await getAttachment({
+  const rep = await getAttachment({
     INPUT_STATUS: "failure",
     INPUT_MESSAGE_FORMAT: "{emoji} *{workflow}* {status_message}",
     INPUT_MENTION_GROUPS: "SAZ94GDB8,!channel",
@@ -123,9 +123,7 @@ test("workflow with mentions groups", async () => {
 })
 
 test("workflow with mention users & groups", async () => {
-  let rep
-
-  rep = await getAttachment({
+  const rep = await getAttachment({
     INPUT_STATUS: "failure",
     INPUT_MESSAGE_FORMAT: "{emoji}",
     INPUT_MENTION_USERS: "U0160UUNH8S,U0080UUAA9N",
